@@ -91,7 +91,7 @@ class MainView:
         
         # Menu Biểu đồ
         chart_menu = tk.Menu(menubar, tearoff=0)
-        chart_menu.add_command(label="Biểu đồ phân phối điểm", command=lambda: self.controller.show_chart("distribution"))
+        # Đã loại bỏ: chart_menu.add_command(label="Biểu đồ phân phối điểm", command=lambda: self.controller.show_chart("distribution"))
         chart_menu.add_command(label="Biểu đồ so sánh", command=lambda: self.controller.show_chart("comparison"))
         chart_menu.add_command(label="Biểu đồ xu hướng", command=lambda: self.controller.show_chart("trend"))
         menubar.add_cascade(label="Biểu đồ", menu=chart_menu)
