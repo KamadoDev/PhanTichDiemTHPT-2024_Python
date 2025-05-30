@@ -16,7 +16,7 @@ class MainView:
         
         Args:
             root: Cửa sổ gốc Tkinter
-            controller: Controller điều khiển ứng dụng
+            controller: Controller tham chiếu đến đối tượng điều khiển ứng dụng
         """
         self.root = root
         self.controller = controller
@@ -38,10 +38,10 @@ class MainView:
         main_frame = ttk.Frame(self.root)
         main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
         
-        # Notebook (Tab Control)
+        # Notebook (tạo bộ điều khiển dang Tab Control)
         self.tab_control = ttk.Notebook(main_frame)
         
-        # Tab 1: Quản lý dữ liệu (đưa lên đầu tiên)
+        # Tab 1: Quản lý dữ liệu (đưa lên đầu tiên/thêm vào note bằng tab_control)
         self.tab_data = ttk.Frame(self.tab_control)
         self.tab_control.add(self.tab_data, text="Quản lý dữ liệu")
         
@@ -58,7 +58,7 @@ class MainView:
         self.tab_control.add(self.tab_charts, text="Biểu đồ")
         
         # Bỏ tab tìm kiếm vì đã gộp vào quản lý dữ liệu
-        
+        #hiển thị notebook
         self.tab_control.pack(expand=1, fill=tk.BOTH)
     
     def initialize_views(self):
