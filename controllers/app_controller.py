@@ -10,6 +10,7 @@ xử lý sự kiện giữa model và view.
 
 import tkinter as tk
 from tkinter import messagebox
+from tkinter import ttk  # Thêm dòng này để import module ttk
 
 from models.data_model import DataModel
 from views.main_view import MainView
@@ -44,6 +45,10 @@ class AppController:
         subjects = self.model.get_subject_names()
         self.view.update_subject_lists(subjects)
     
+    def get_subjects_list(self):
+        """Lấy dictionary môn học (code: name)"""
+        return self.model.subjects_dict
+    
     def update_overview(self):
         """Cập nhật tab tổng quan"""
         stats = self.model.get_overview_stats()
@@ -71,8 +76,27 @@ class AppController:
         if data is not None:
             self.view.draw_chart(subject_name, chart_type, data)
     
+    def draw_advanced_chart(self, chart_type):
+        """Vẽ biểu đồ nâng cao"""
+        if chart_type == "correlation_matrix":
+            data = self.model.get_correlation_matrix()
+            if data:
+                self.view.chart_view.update_chart(None, chart_type, data)
+        elif chart_type == "combinations":
+            data = self.model.get_subject_combinations_data()
+            if data:
+                self.view.chart_view.update_chart(None, chart_type, data)
+        elif chart_type == "all_subjects":
+            data = self.model.get_all_subjects_distribution()
+            if data:
+                self.view.chart_view.update_chart(None, chart_type, data)
+    
     def update_data_view(self):
         """Cập nhật tab dữ liệu"""
+        # Thay đổi từ get_paginated_data() sang get_data() toàn bộ
+        data = self.model.get_current_data()
+        if data is not None:
+            self.view.data_view.load_data(data)
         data, total_pages = self.model.get_paginated_data()
         if data is not None:
             self.view.update_data_table(data, self.model.current_page + 1, total_pages)
@@ -152,20 +176,58 @@ class AppController:
                 messagebox.showerror("Lỗi", f"Không thể xóa thí sinh: {message}")
         return False
     
-    def search_data(self, search_text):
-        """Tìm kiếm dữ liệu theo từ khóa"""
+    def search_data(self, search_text, search_column="Tất cả"):
+        """Tìm kiếm dữ liệu theo từ khóa và cột"""
         if self.model.df is None:
             return None
         
-        # Tìm kiếm trong tất cả các cột
-        result = self.model.df[self.model.df.astype(str).apply(
-            lambda row: row.str.contains(search_text, case=False).any(), axis=1)]
+        # Ánh xạ tên hiển thị của cột sang tên cột trong DataFrame
+        column_map = {
+            "SBD": "sbd",
+            "Toán": "toan", 
+            "Ngữ văn": "ngu_van", 
+            "Ngoại ngữ": "ngoai_ngu",
+            "Vật lí": "vat_li", 
+            "Hóa học": "hoa_hoc", 
+            "Sinh học": "sinh_hoc",
+            "Lịch sử": "lich_su", 
+            "Địa lí": "dia_li", 
+            "GDCD": "gdcd",
+            "Mã NN": "ma_ngoai_ngu"
+        }
         
+        # Nếu tìm kiếm tất cả các cột
+        if search_column == "Tất cả":
+            # Tạo mask cho từng cột và kết hợp chúng
+            mask = False
+            for display_name, col in column_map.items():
+                if col in self.model.df.columns:
+                    # Chỉ chuyển đổi cột hiện tại sang chuỗi, không phải toàn bộ DataFrame
+                    col_mask = self.model.df[col].astype(str).str.contains(search_text, case=False, na=False)
+                    mask = mask | col_mask
+        else:
+            # Tìm kiếm trong cột cụ thể
+            df_column = column_map.get(search_column)
+            if df_column and df_column in self.model.df.columns:
+                mask = self.model.df[df_column].astype(str).str.contains(search_text, case=False, na=False)
+            else:
+                return None
+        
+        # Áp dụng mask để lọc DataFrame
+        result = self.model.df[mask]
+        
+        # Giới hạn số lượng kết quả để tránh quá tải
+        if len(result) > 1000:
+            result = result.head(1000)
+            
+        # LưU KẾT QUẢ TÌM KIẾM - DÒNG QUAN TRỌNG NHẤT
+        self.filtered_data = result
+            
         return result
     
-    def sort_data(self, column):
+    def sort_data(self, column, ascending=True):
         """Sắp xếp dữ liệu theo cột"""
-        if self.model.sort_data(column):
+        if self.model.sort_data(column, ascending):
             return self.model.df
         return None
     
@@ -177,13 +239,24 @@ class AppController:
         else:
             messagebox.showwarning("Cảnh báo", "Không thể lọc dữ liệu với điều kiện đã chọn!")
     
-    def save_data(self):
-        """Lưu dữ liệu vào file CSV"""
-        success, message = self.model.save_data()
-        if success:
-            messagebox.showinfo("Thông báo", message)
-        else:
-            messagebox.showerror("Lỗi", message)
+    def clear_filter(self):
+        """Xóa bộ lọc dữ liệu"""
+        self.filtered_data = None
+        # Refresh data view với dữ liệu gốc
+        if hasattr(self, 'view') and hasattr(self.view, 'data_view'):
+            self.view.data_view.load_data(self.get_data())
+    
+    def get_filtered_data(self):
+        """Lấy dữ liệu đã được lọc (kết quả tìm kiếm)
+        
+        Returns:
+            DataFrame: Dữ liệu đã được lọc
+        """
+        # Nếu có dữ liệu đã lọc, trả về dữ liệu đó
+        if hasattr(self, 'filtered_data') and self.filtered_data is not None:
+            return self.filtered_data
+        # Nếu không, trả về toàn bộ dữ liệu
+        return self.model.get_current_data()
     
     def get_data(self):
         """Lấy dữ liệu hiện tại từ model
@@ -271,11 +344,10 @@ class AppController:
         help_text = """
         HƯỚNG DẪN SỬ DỤNG PHẦM MỀM PHÂN TÍCH ĐIỂM THI THPT 2024
         
-        1. Tab Tổng quan: Hiển thị thống kê tổng quan về dữ liệu điểm thi
-        2. Tab Tìm kiếm: Tìm kiếm thông tin thí sinh theo SBD
+        1. Tab Quản lý dữ liệu: Xem, thêm, sửa, xóa dữ liệu thí sinh và tìm kiếm
+        2. Tab Tổng quan: Hiển thị thống kê tổng quan về dữ liệu điểm thi
         3. Tab Phân tích: Phân tích thống kê chi tiết theo từng môn học
         4. Tab Biểu đồ: Vẽ các loại biểu đồ phân tích điểm thi
-        5. Tab Quản lý dữ liệu: Xem, thêm, sửa, xóa dữ liệu thí sinh
         
         Các chức năng chính:
         - Mở file CSV: Tải dữ liệu từ file CSV khác
@@ -342,7 +414,7 @@ class AppController:
         # Tạo cửa sổ dialog
         dialog = tk.Toplevel(self.root)
         dialog.title(title)
-        dialog.geometry("500x600")
+        dialog.geometry("500x500")
         dialog.transient(self.root)  # Đặt cửa sổ dialog là con của cửa sổ chính
         dialog.grab_set()  # Ngăn tương tác với cửa sổ chính khi dialog đang mở
         
@@ -351,80 +423,40 @@ class AppController:
         main_frame.pack(fill=tk.BOTH, expand=True)
         
         # Tiêu đề
-        header_label = ttk.Label(main_frame, text="Cập nhật dữ liệu" if student else "Thêm dữ liệu mới", font=("Arial", 12, "bold"))
+        header_label = ttk.Label(main_frame, text="Thêm thí sinh mới" if student is None else "Sửa thông tin thí sinh", font=("Arial", 12, "bold"))
         header_label.grid(row=0, column=0, columnspan=2, pady=(0, 15), sticky=tk.W)
         
         # Các trường nhập liệu
-        # Tạo style cho các label và entry
-        style = ttk.Style()
-        style.configure("Dialog.TLabel", padding=(5, 5))
-        style.configure("Dialog.TEntry", padding=(5, 5))
-        
-        # Các trường nhập liệu
-        ttk.Label(main_frame, text="Name:", style="Dialog.TLabel").grid(row=1, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main_frame, text="SBD:").grid(row=1, column=0, sticky=tk.W, pady=5)
         sbd_entry = ttk.Entry(main_frame, width=30)
         sbd_entry.grid(row=1, column=1, pady=5, padx=5, sticky=tk.W)
         
         # Thêm các trường nhập liệu cho các môn học
-        fields = [
-            ("Age:", "toan"),
-            ("Marital Status:", "ngu_van"),
-            ("Education Level:", "ngoai_ngu"),
-            ("Number of Children:", "vat_li"),
-            ("Smoking Status:", "hoa_hoc"),
-            ("Physical Activity Level:", "sinh_hoc"),
-            ("Employment Status:", "lich_su"),
-            ("Income:", "dia_li"),
-            ("Alcohol Consumption:", "gdcd"),
-            ("Dietary Habits:", "dietary_habits"),
-            ("Sleep Patterns:", "sleep_patterns"),
-            ("History of Mental Illness:", "mental_illness"),
-            ("History of Substance Abuse:", "substance_abuse"),
-            ("Family History of Depression:", "family_depression"),
-            ("Chronic Medical Conditions:", "chronic_conditions"),
-            ("Depression Risk:", "depression_risk")
+        subjects = [
+            ("Toán", "toan"), 
+            ("Ngữ văn", "ngu_van"), 
+            ("Ngoại ngữ", "ngoai_ngu"),
+            ("Vật lí", "vat_li"), 
+            ("Hóa học", "hoa_hoc"), 
+            ("Sinh học", "sinh_hoc"),
+            ("Lịch sử", "lich_su"), 
+            ("Địa lí", "dia_li"), 
+            ("GDCD", "gdcd")
         ]
         
         entries = {"sbd": sbd_entry}
         
-        for i, (field_name, field_code) in enumerate(fields):
-            ttk.Label(main_frame, text=field_name, style="Dialog.TLabel").grid(row=i+2, column=0, sticky=tk.W, pady=5)
-            
-            # Tạo combobox cho các trường có giá trị cố định
-            if field_name in ["Marital Status:", "Education Level:", "Smoking Status:", 
-                           "Physical Activity Level:", "Employment Status:", 
-                           "Alcohol Consumption:", "Dietary Habits:", "Sleep Patterns:",
-                           "History of Mental Illness:", "History of Substance Abuse:",
-                           "Family History of Depression:", "Depression Risk:"]:
-                values = []
-                if field_name == "Marital Status:":
-                    values = ["Single", "Married", "Divorced", "Widowed"]
-                elif field_name == "Education Level:":
-                    values = ["High School", "Bachelor's Degree", "Master's Degree", "PhD"]
-                elif field_name == "Smoking Status:":
-                    values = ["Non-smoker", "Former", "Current"]
-                elif field_name == "Physical Activity Level:":
-                    values = ["Sedentary", "Moderate", "Active", "Very Active"]
-                elif field_name == "Employment Status:":
-                    values = ["Employed", "Unemployed", "Student", "Retired"]
-                elif field_name == "Alcohol Consumption:":
-                    values = ["None", "Occasional", "Moderate", "Heavy"]
-                elif field_name == "Dietary Habits:":
-                    values = ["Poor", "Fair", "Good", "Excellent"]
-                elif field_name == "Sleep Patterns:":
-                    values = ["Poor", "Fair", "Good", "Excellent"]
-                elif field_name == "History of Mental Illness:" or field_name == "History of Substance Abuse:" or field_name == "Family History of Depression:" or field_name == "Chronic Medical Conditions:":
-                    values = ["Yes", "No"]
-                elif field_name == "Depression Risk:":
-                    values = ["Low", "Medium", "High"]
-                    
-                combo = ttk.Combobox(main_frame, width=28, values=values, state="readonly")
-                combo.grid(row=i+2, column=1, pady=5, padx=5, sticky=tk.W)
-                entries[field_code] = combo
-            else:
-                entry = ttk.Entry(main_frame, width=30)
-                entry.grid(row=i+2, column=1, pady=5, padx=5, sticky=tk.W)
-                entries[field_code] = entry
+        for i, (subject_name, subject_code) in enumerate(subjects):
+            ttk.Label(main_frame, text=f"{subject_name}:").grid(row=i+2, column=0, sticky=tk.W, pady=5)
+            entry = ttk.Entry(main_frame, width=30)
+            entry.grid(row=i+2, column=1, pady=5, padx=5, sticky=tk.W)
+            entries[subject_code] = entry
+        
+        # Mã ngoại ngữ
+        ttk.Label(main_frame, text="Mã ngoại ngữ:").grid(row=len(subjects)+2, column=0, sticky=tk.W, pady=5)
+        ma_nn_combo = ttk.Combobox(main_frame, width=28, values=["N1", "N2", "N3", "N4", "N5", "N6", "N7"], state="readonly")
+        ma_nn_combo.grid(row=len(subjects)+2, column=1, pady=5, padx=5, sticky=tk.W)
+        entries["ma_ngoai_ngu"] = ma_nn_combo
         
         # Nếu là sửa, điền dữ liệu vào các trường
         if student is not None:
@@ -433,7 +465,7 @@ class AppController:
             
             for field_code in entries.keys():
                 if field_code != "sbd" and field_code in student:
-                    if isinstance(entries[field_code], ttk.Combobox):
+                    if field_code == "ma_ngoai_ngu":
                         entries[field_code].set(student[field_code])
                     else:
                         entries[field_code].insert(0, student[field_code])
@@ -447,18 +479,18 @@ class AppController:
             # Thu thập dữ liệu từ các trường nhập liệu
             student_data = {}
             for field, entry in entries.items():
-                if isinstance(entry, ttk.Combobox):
+                if field == "ma_ngoai_ngu":
                     value = entry.get()
                 else:
                     value = entry.get().strip()
                 
                 # Kiểm tra SBD không được để trống
                 if field == "sbd" and not value:
-                    messagebox.showwarning("Cảnh báo", "Name không được để trống!")
+                    messagebox.showwarning("Cảnh báo", "SBD không được để trống!")
                     return
                 
-                # Chuyển điểm về kiểu số nếu có giá trị và là trường điểm
-                if field in ["toan", "ngu_van", "ngoai_ngu", "vat_li", "hoa_hoc", "sinh_hoc", "lich_su", "dia_li", "gdcd"] and value:
+                # Chuyển điểm về kiểu số nếu có giá trị
+                if field not in ["sbd", "ma_ngoai_ngu"] and value:
                     try:
                         value = float(value)
                         # Kiểm tra điểm hợp lệ (0-10)
@@ -494,3 +526,34 @@ class AppController:
     def show_message(self, title, message, message_type="info"):
         """Hiển thị thông báo"""
         self.view.show_message(title, message, message_type)
+
+def draw_advanced_chart(self, chart_type):
+    """Vẽ biểu đồ nâng cao"""
+    if chart_type == "correlation_matrix":
+        data = self.model.get_correlation_matrix()
+        if data:
+            self.view.chart_view.update_chart(None, chart_type, data)
+    elif chart_type == "combinations":
+        data = self.model.get_subject_combinations_data()
+        if data:
+            self.view.chart_view.update_chart(None, chart_type, data)
+    elif chart_type == "all_subjects":
+        data = self.model.get_all_subjects_distribution()
+        if data:
+            self.view.chart_view.update_chart(None, chart_type, data)
+    
+    def get_subject_distribution_data(self, subject_code):
+        """Lấy dữ liệu phân phối điểm của một môn học"""
+        return self.model.get_subject_distribution_data(subject_code)
+    
+    def get_combination_distribution_data(self):
+        """Lấy dữ liệu phân phối tổ hợp môn"""
+        return self.model.get_combination_distribution_data()
+    
+    def get_average_scores_data(self):
+        """Lấy dữ liệu điểm trung bình các môn"""
+        return self.model.get_average_scores_data()
+    
+    def get_top_students_data(self, top_n=10):
+        """Lấy dữ liệu top học sinh"""
+        return self.model.get_top_students_data(top_n)
